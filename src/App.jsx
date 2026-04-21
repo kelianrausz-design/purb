@@ -1275,7 +1275,7 @@ JSON: {"messages":[{"approach":"nom approche","text":"le msg","send_via":"instag
           <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px 20px" }}>
 
             {loading && (
-              <BigLoader status={status} done={progress.done} total={progress.total} label="Rédaction DMs" onStop={() => { stop(); }}
+              <BigLoader status={status} done={progress.done} total={progress.total} label="Rédaction DMs" onStop={() => { stop(); }}/>
             )}
 
 
