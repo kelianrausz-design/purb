@@ -144,11 +144,11 @@ app.post("/api/contacts/batch", async (req, res) => {
 
 // /api/genius-network — réseau artistique via Genius (producers, featurings) + fan counts Deezer
 app.get("/api/genius-network", async (req, res) => {
-  const { name } = req.query;
+  const { name, deezer_id } = req.query;
   if (!name) return res.status(400).json({ error: "missing name" });
   try {
-    console.log(`→ Genius network: "${name}"`);
-    const result = await buildGeniusNetwork(name);
+    console.log(`→ Genius network: "${name}"${deezer_id ? ` (deezer_id: ${deezer_id})` : ""}`);
+    const result = await buildGeniusNetwork(name, deezer_id || null);
     console.log(`  ✓ ${result.artists.length} artistes · ${result.beatmakers.length} beatmakers`);
     res.json(result);
   } catch (err) {

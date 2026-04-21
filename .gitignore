@@ -1,6 +1,9 @@
 # Secrets
 .env
 
+# Cache contacts (Apify/Serper)
+contacts-cache.json
+
 # Tooling interne
 .claude/
 

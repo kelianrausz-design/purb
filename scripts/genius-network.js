@@ -25,41 +25,85 @@ async function geniusGet(path) {
   const res = await fetch(`https://api.genius.com${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error(`Genius HTTP ${res.status}: ${path}`);
+  if (!res.ok) {
+    if (res.status === 502 || res.status === 503 || res.status === 429) {
+      await delay(1000);
+      const retry = await fetch(`https://api.genius.com${path}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!retry.ok) throw new Error(`Genius HTTP ${retry.status}: ${path}`);
+      const retryData = await retry.json();
+      return retryData.response;
+    }
+    throw new Error(`Genius HTTP ${res.status}: ${path}`);
+  }
   const data = await res.json();
   return data.response;
 }
 
 // ── Recherche artiste sur Genius ─────────────────────────────
 
-async function findArtistOnGenius(name) {
-  const data = await geniusGet(`/search?q=${encodeURIComponent(name)}`);
+async function findArtistOnGenius(name, deezerId = null) {
   const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
   const target = norm(name);
 
-  // Correspondance exacte d'abord
-  const exact = (data.hits || []).find(
-    (h) => h.type === "song" && norm(h.result?.primary_artist?.name || "") === target
-  );
+  // Si on a un deezer_id, on récupère un top track pour chercher via ce track sur Genius
+  if (deezerId) {
+    try {
+      await delay(200);
+      const deezerRes = await fetch(`https://api.deezer.com/artist/${deezerId}/top?limit=3`);
+      const deezerData = await deezerRes.json();
+      const tracks = deezerData.data || [];
+      for (const track of tracks) {
+        const query = `${name} ${track.title}`;
+        const data = await geniusGet(`/search?q=${encodeURIComponent(query)}`);
+        const songs = (data.hits || []).filter((h) => h.type === "song");
+        const match = songs.find((h) => norm(h.result?.primary_artist?.name || "") === target);
+        if (match) return match.result.primary_artist;
+      }
+    } catch { /* fallback sur la recherche normale */ }
+  }
+
+  // Recherche standard par nom
+  const data = await geniusGet(`/search?q=${encodeURIComponent(name)}`);
+  const songs = (data.hits || []).filter((h) => h.type === "song");
+
+  // 1. Exact match
+  const exact = songs.find((h) => norm(h.result?.primary_artist?.name || "") === target);
   if (exact) return exact.result.primary_artist;
 
-  // Correspondance partielle (le nom contient ou est contenu)
-  const partial = (data.hits || []).find(
-    (h) =>
-      h.type === "song" &&
-      (norm(h.result?.primary_artist?.name || "").includes(target) ||
-        target.includes(norm(h.result?.primary_artist?.name || "")))
-  );
-  return partial?.result?.primary_artist || null;
+  // Pour les noms courts (≤ 3 chars), on refuse les matchs approximatifs
+  if (target.length <= 3) return null;
+
+  // 2. Genius name starts with target (ex: "Tiako" → "Tiakola" ok)
+  const startsWith = songs.find((h) => norm(h.result?.primary_artist?.name || "").startsWith(target));
+  if (startsWith) return startsWith.result.primary_artist;
+
+  // 3. Target starts with Genius name (ex: "Laylow" → "Lay" → ok si target ≥ 5 chars)
+  if (target.length >= 5) {
+    const contained = songs.find((h) => target.startsWith(norm(h.result?.primary_artist?.name || "")));
+    if (contained) return contained.result.primary_artist;
+  }
+
+  return null;
 }
 
 // ── Songs de l'artiste ────────────────────────────────────────
 
-async function getArtistSongs(artistId, limit = 20) {
-  const data = await geniusGet(
-    `/artists/${artistId}/songs?sort=popularity&per_page=${limit}&page=1`
-  );
-  return data.songs || [];
+async function getArtistSongs(artistId, maxSongs = 200) {
+  const allSongs = [];
+  let page = 1;
+  while (allSongs.length < maxSongs) {
+    const data = await geniusGet(
+      `/artists/${artistId}/songs?sort=popularity&per_page=50&page=${page}`
+    );
+    const batch = data.songs || [];
+    if (!batch.length) break;
+    allSongs.push(...batch);
+    if (batch.length < 50) break;
+    page++;
+  }
+  return allSongs.slice(0, maxSongs);
 }
 
 // ── Détail d'une song (producers, writers, custom_performances) ──
@@ -130,15 +174,15 @@ function isProductionLabel(label) {
  * @param {string} artistName
  * @returns {Promise<{ artists: object[], beatmakers: object[] }>}
  */
-export async function buildGeniusNetwork(artistName) {
+export async function buildGeniusNetwork(artistName, deezerId = null) {
   const result = { artists: [], beatmakers: [] };
 
   // 1. Trouver l'artiste
-  const artist = await findArtistOnGenius(artistName);
+  let artist = await findArtistOnGenius(artistName, deezerId);
   if (!artist) return result;
 
-  // 2. Top songs — 40 pour trouver plus de beatmakers
-  const songs = await getArtistSongs(artist.id, 40);
+  // 2. Discographie complète (max 200 songs, paginée)
+  const songs = await getArtistSongs(artist.id, 200);
   if (!songs.length) return result;
 
   // 3. Featured artists depuis la liste (rapide, pas de fetch individuel)
@@ -151,10 +195,10 @@ export async function buildGeniusNetwork(artistName) {
     }
   }
 
-  // 4. Détails des 10 premières songs → producers, custom_performances, writers
+  // 4. Détails des 50 premières songs → producers, custom_performances, writers
   const producerMap = new Map(); // name → { name, songs[], role }
 
-  for (const song of songs.slice(0, 20)) {
+  for (const song of songs.slice(0, 50)) {
     try {
       const details = await getSongDetails(song.id);
 

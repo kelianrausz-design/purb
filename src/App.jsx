@@ -298,7 +298,7 @@ const LOADER_MSGS = [
   "Un seul bon contact peut tout changer.",
 ];
 
-function BigLoader({ status, done = 0, total = 0, label = "" }) {
+function BigLoader({ status, done = 0, total = 0, label = "", onStop }) {
   const [msgIdx, setMsgIdx] = useState(0);
   useEffect(() => {
     const iv = setInterval(() => setMsgIdx(i => (i + 1) % LOADER_MSGS.length), 3800);
@@ -402,6 +402,11 @@ function BigLoader({ status, done = 0, total = 0, label = "" }) {
             → {status}
           </div>
         )}
+        {onStop && (
+          <button onClick={onStop} className="sans" style={{ marginTop: 20, padding: "8px 24px", borderRadius: 2, fontSize: 11, fontWeight: 700, background: "none", border: "1px solid var(--b2)", color: "var(--g3)", cursor: "pointer", letterSpacing: "1px" }}>
+            ■ STOP
+          </button>
+        )}
       </div>
 
       {/* EQBars bas de page */}
@@ -434,6 +439,91 @@ function Logo({ size = 28 }) {
   );
 }
 
+function ArtistAutocomplete({ value, onChange, onSelect, disabled }) {
+  const [suggestions, setSuggestions] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [highlighted, setHighlighted] = useState(-1);
+  const debounceRef = useRef(null);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    clearTimeout(debounceRef.current);
+    if (!value.trim() || value.length < 2) { setSuggestions([]); setOpen(false); return; }
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/deezer?path=" + encodeURIComponent(`/search/artist?q=${encodeURIComponent(value)}&limit=6`));
+        const data = await res.json();
+        const hits = (data.data || []).filter(a => a.nb_fan !== undefined);
+        setSuggestions(hits);
+        setOpen(hits.length > 0);
+        setHighlighted(-1);
+      } catch { /* silencieux */ }
+    }, 280);
+    return () => clearTimeout(debounceRef.current);
+  }, [value]);
+
+  useEffect(() => {
+    const handler = e => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  function formatFans(n) {
+    if (n >= 1000000) return `${(n/1000000).toFixed(1)}M fans`;
+    if (n >= 1000) return `${Math.round(n/1000)}K fans`;
+    return `${n} fans`;
+  }
+
+  function handleKey(e) {
+    if (!open) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); setHighlighted(h => Math.min(h + 1, suggestions.length - 1)); }
+    if (e.key === "ArrowUp") { e.preventDefault(); setHighlighted(h => Math.max(h - 1, 0)); }
+    if (e.key === "Enter" && highlighted >= 0) { e.preventDefault(); pick(suggestions[highlighted]); }
+    if (e.key === "Escape") setOpen(false);
+  }
+
+  function pick(artist) {
+    onSelect(artist.name, artist);
+    setOpen(false);
+    setSuggestions([]);
+  }
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative", flex: 1 }}>
+      <input
+        className="sans"
+        style={{ width: "100%", padding: "16px 20px", borderRadius: open ? "2px 2px 0 0" : 2, border: "1px solid var(--b2)", borderBottom: open ? "1px solid var(--accent)" : "1px solid var(--b2)", background: "var(--s1)", color: "var(--white)", fontSize: 15, boxSizing: "border-box", outline: "none" }}
+        value={value}
+        onChange={e => { onChange(e.target.value); }}
+        onKeyDown={e => { handleKey(e); if (e.key === "Enter" && highlighted < 0) { setOpen(false); } }}
+        onFocus={() => suggestions.length > 0 && setOpen(true)}
+        placeholder="ex: Laylow, TKKF, La Fève..."
+        disabled={disabled}
+        autoFocus
+      />
+      {open && (
+        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "var(--bg)", border: "1px solid var(--b2)", borderTop: "none", borderRadius: "0 0 2px 2px", zIndex: 99, boxShadow: "0 8px 24px rgba(0,0,0,0.08)" }}>
+          {suggestions.map((a, i) => (
+            <div
+              key={a.id}
+              onMouseEnter={() => setHighlighted(i)}
+              onMouseDown={() => pick(a)}
+              style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", background: i === highlighted ? "var(--s2)" : "transparent", cursor: "pointer", borderBottom: i < suggestions.length - 1 ? "1px solid var(--b1)" : "none" }}
+            >
+              {a.picture_small && <img src={a.picture_small} alt="" style={{ width: 36, height: 36, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />}
+              <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
+                <div className="sans" style={{ fontSize: 14, fontWeight: 600, color: "var(--white)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.name}</div>
+                <div className="mono" style={{ fontSize: 10, color: "var(--g2)", letterSpacing: "0.5px" }}>{formatFans(a.nb_fan)}</div>
+              </div>
+              <div className="mono" style={{ fontSize: 9, color: "var(--accent)", letterSpacing: "1.5px" }}>→</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Loader({ text }) {
   return (
     <div className="sans" style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 0", color: "var(--g3)", fontSize: 13 }}>
@@ -446,8 +536,33 @@ function Loader({ text }) {
 // ─── APP ──────────────────────────────────────────────────────────────────────
 export default function PurB() {
   const [page, setPage]         = useState("landing");
+  const [user, setUser]         = useState(() => { try { return JSON.parse(localStorage.getItem("purb_user") || "null"); } catch { return null; } });
   const [step, setStep]         = useState(0);
   const [tb, setTb]             = useState("");
+  const [selectedDeezerArtist, setSelectedDeezerArtist] = useState(null);
+  const gmailClientRef = useRef(null);
+  const isRunningRef = useRef(false);
+  const stopRef = useRef(false);
+  const stop = () => { stopRef.current = true; };
+
+  useEffect(() => {
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    if (!clientId) return;
+    const init = () => {
+      if (!window.google?.accounts?.id) return;
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: (resp) => {
+          const payload = JSON.parse(atob(resp.credential.split(".")[1]));
+          const u = { name: payload.name, email: payload.email, picture: payload.picture };
+          setUser(u);
+          localStorage.setItem("purb_user", JSON.stringify(u));
+        },
+      });
+    };
+    if (window.google?.accounts?.id) init();
+    else { const t = setInterval(() => { if (window.google?.accounts?.id) { init(); clearInterval(t); } }, 200); return () => clearInterval(t); }
+  }, []);
   const [artists, setArtists]   = useState([]);
   const [beatmakers, setBeatmakers] = useState([]);
   const [sel, setSel]           = useState(new Set());
@@ -462,6 +577,7 @@ export default function PurB() {
 
   const log = m => setDebug(d => [...d.slice(-19), `${new Date().toLocaleTimeString()} ${m}`]);
 
+
   useEffect(() => {
     const o = new IntersectionObserver(entries => {
       entries.forEach(x => {
@@ -475,15 +591,19 @@ export default function PurB() {
     return () => o.disconnect();
   }, [page, step]);
 
-  const launch = useCallback(async () => {
-    const input = tb.trim();
+  const launch = useCallback(async (forceName, forceDeezerArtist) => {
+    const input = (forceName || tb).trim();
     if (!input || loading) return;
+    stopRef.current = false;
+    const deezerArtist = forceDeezerArtist ?? selectedDeezerArtist;
     setLoading(true); setError(null); setDebug([]); setArtists([]); setBeatmakers([]); setSel(new Set()); setProgress({ done: 0, total: 0 });
     try {
       log(`Recherche "${input}" sur Genius...`);
       setStatus(`Exploration du réseau de "${input}"...`);
       setStep(1);
-      const res = await fetch(`/api/genius-network?name=${encodeURIComponent(input)}`);
+      const params = new URLSearchParams({ name: input });
+      if (deezerArtist?.id) params.set("deezer_id", deezerArtist.id);
+      const res = await fetch(`/api/genius-network?${params}`);
       if (!res.ok) throw new Error(`Genius network: HTTP ${res.status}`);
       const data = await res.json();
       if (!data.artists?.length && !data.beatmakers?.length) throw new Error(`"${input}" introuvable — essaie un autre nom`);
@@ -491,38 +611,47 @@ export default function PurB() {
       setBeatmakers(data.beatmakers || []);
       log(`✅ ${data.artists?.length || 0} artistes · ${data.beatmakers?.length || 0} beatmakers`);
     } catch (e) {
-      log(`❌ ${e.message}`); setError(e.message); setStep(0);
+      if (!stopRef.current) { log(`❌ ${e.message}`); setError(e.message); setStep(0); }
     }
-    setLoading(false); setStatus("");
+    setLoading(false); setStatus(""); stopRef.current = false;
   }, [tb, loading]);
 
   const searchContacts = useCallback(async () => {
     if (sel.size === 0 || loading) return;
-    setLoading(true);
+    stopRef.current = false;
+    setLoading(true); setError(null);
     const all = [...artists, ...beatmakers.map(b => ({ ...b, _bm: 1 }))];
     const targets = all.filter(a => sel.has(a.name));
     const out = { ...contacts };
+    let done = 0;
     setProgress({ done: 0, total: targets.length });
-    for (let i = 0; i < targets.length; i++) {
-      const t = targets[i];
-      setStatus(`${t.name}...`);
-      try {
-        const res = await fetch(`/api/contacts?name=${encodeURIComponent(t.name)}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const p = await res.json();
-        out[t.name] = p;
-        log(`✅ ${t.name}: IG=${p.instagram || "—"} · ${p.confidence}`);
-      } catch (e) {
-        out[t.name] = { name: t.name, error: e.message };
-        log(`❌ ${t.name}: ${e.message}`);
-      }
-      setProgress({ done: i + 1, total: targets.length });
+    setStatus(`Scraping ${targets.length} contacts en parallèle...`);
+
+    const BATCH = 3;
+    for (let i = 0; i < targets.length; i += BATCH) {
+      if (stopRef.current) break;
+      const batch = targets.slice(i, i + BATCH);
+      await Promise.allSettled(batch.map(async (t) => {
+        try {
+          const res = await fetch(`/api/contacts?name=${encodeURIComponent(t.name)}`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const p = await res.json();
+          out[t.name] = p;
+          log(`✅ ${t.name}: IG=${p.instagram || "—"} · ${p.confidence}`);
+        } catch (e) {
+          out[t.name] = { name: t.name, error: e.message };
+          log(`❌ ${t.name}: ${e.message}`);
+        }
+        done++;
+        setProgress({ done, total: targets.length });
+      }));
     }
-    setContacts(out); setLoading(false); setStatus("");
+    setContacts(out); setLoading(false); setStatus(""); stopRef.current = false;
   }, [sel, artists, beatmakers, contacts, loading]);
 
   const writeDrafts = useCallback(async () => {
-    if (loading) return;
+    if (isRunningRef.current) return;
+    isRunningRef.current = true;
     setLoading(true);
     const names = Object.keys(contacts).filter(n => !contacts[n]?.error);
     const allPeople = [...artists, ...beatmakers];
@@ -537,21 +666,37 @@ export default function PurB() {
         const topTrack = artistInfo?.top_track || null;
         const nbFan    = artistInfo?.nb_fan ?? null;
         const txt = await askClaude(
-          `Rédige un DM de beatmaker pour envoyer une prod à ${n}.
-${nbFan !== null ? `Infos: ${nbFan.toLocaleString("fr-FR")} fans Deezer.` : ""}${topTrack ? ` Top track Deezer: "${topTrack}".` : ""}
-Contact: ${JSON.stringify(contacts[n])}
-RÈGLES: Humain pas IA. Court (4-6 lignes). Tutoiement.${topTrack ? ` CITE le son "${topTrack}" (obligatoire).` : ""} Décontracté mais pro. 2 variantes TRÈS différentes.
-JSON: {"messages":[{"approach":"nom approche","text":"le msg","send_via":"instagram DM/email"}]}`,
-          "Beatmaker FR qui DM. Naturel. JSON uniquement.", 1000);
+          `Tu es un jeune beatmaker français. Tu veux envoyer une prod à ${n}. Rédige 2 messages très différents.
+${topTrack ? `Tu connais son son "${topTrack}" — mentionne-le naturellement dans au moins un des messages.` : ""}
+${nbFan !== null && nbFan < 50000 ? `C'est un artiste émergent, pas une star inaccessible.` : ""}
+
+STYLE ABSOLU :
+- Tu parles comme un vrai mec, pas comme une IA ou un commercial
+- Pas de "j'espère que tu vas bien", pas de "je me permets", pas de "en tant que beatmaker"
+- Pas de majuscules en début de chaque phrase si ça sonne forcé
+- Court. 3-5 lignes max. Comme un vrai DM insta ou mail direct
+- Tutoiement. Naturel. Comme si t'envoyais ça à quelqu'un que tu respectes
+- Une variante directe/courte, une variante avec un peu plus de contexte sur toi
+
+JSON: {"messages":[{"approach":"nom approche","text":"le msg","send_via":"instagram DM ou email"}]}`,
+          "Tu génères des DMs de beatmaker authentiques. Zéro bullshit. JSON uniquement.", 1000);
         const p = parseJSON(txt);
         if (p?.messages) { out[n] = p.messages; log(`✅ ${n}: ${p.messages.length} variantes`); }
       } catch (e) { log(`❌ ${n}: ${e.message}`); }
       setProgress({ done: i + 1, total: names.length });
     }
-    setDrafts(out); setLoading(false); setStatus("");
+    setDrafts(out); setLoading(false); setStatus(""); isRunningRef.current = false;
   }, [contacts, drafts, artists, beatmakers, loading]);
 
   const tog      = n => setSel(p => { const x = new Set(p); x.has(n) ? x.delete(n) : x.add(n); return x; });
+  const gmailUrl = (to, subject) => `https://mail.google.com/mail/u/0/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}`;
+  const [gmailCopied, setGmailCopied] = useState(null);
+  const openGmail = (to, subject, body, key) => {
+    if (body) navigator.clipboard?.writeText(body).catch(() => {});
+    window.open(gmailUrl(to, subject), "_blank");
+    setGmailCopied(key || to);
+    setTimeout(() => setGmailCopied(null), 3000);
+  };
   const fa       = wf === "ALL" ? artists : artists.filter(a => a.wave === wf);
   const copy     = t => navigator.clipboard?.writeText(t);
   const wavePill = w => `pill pill-${(w || "low").toLowerCase()}`;
@@ -567,7 +712,15 @@ JSON: {"messages":[{"approach":"nom approche","text":"le msg","send_via":"instag
           <span className="display" style={{ fontSize: 22, color: "var(--white)" }}>PURB</span>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button className="btn-ghost sans" style={{ padding: "7px 18px", borderRadius: 2, fontSize: 12, fontWeight: 500 }}>Connexion</button>
+          {user ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 14px 4px 6px", borderRadius: 99, border: "1px solid var(--b2)", background: "var(--s1)" }}>
+              {user.picture && <img src={user.picture} alt="" style={{ width: 24, height: 24, borderRadius: "50%" }}/>}
+              <span className="sans" style={{ fontSize: 12, fontWeight: 600, color: "var(--g4)" }}>{user.name.split(" ")[0]}</span>
+              <button onClick={() => { setUser(null); localStorage.removeItem("purb_user"); }} className="sans" style={{ fontSize: 10, color: "var(--g2)", background: "none", border: "none", cursor: "pointer", padding: 0 }}>×</button>
+            </div>
+          ) : (
+            <button className="btn-ghost sans" onClick={() => window.google?.accounts?.id?.prompt()} style={{ padding: "7px 18px", borderRadius: 2, fontSize: 12, fontWeight: 500 }}>Connexion</button>
+          )}
           <button className="btn-primary-landing sans" onClick={() => setPage("app")} style={{ padding: "8px 22px", borderRadius: 2, fontSize: 12, fontWeight: 700 }}>Commencer →</button>
         </div>
       </nav>
@@ -734,7 +887,8 @@ JSON: {"messages":[{"approach":"nom approche","text":"le msg","send_via":"instag
             </div>
           ))}
         </div>
-        <details style={{ fontSize: 10, color: "var(--g1)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+<details style={{ fontSize: 10, color: "var(--g1)" }}>
           <summary style={{ cursor: "pointer", listStyle: "none" }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
           </summary>
@@ -742,6 +896,7 @@ JSON: {"messages":[{"approach":"nom approche","text":"le msg","send_via":"instag
             {debug.length === 0 ? "No logs" : debug.map((d, i) => <div key={i}>{d}</div>)}
           </div>
         </details>
+        </div>
       </nav>
 
       {/* ── STEP 0 ── */}
@@ -778,7 +933,7 @@ JSON: {"messages":[{"approach":"nom approche","text":"le msg","send_via":"instag
             <div data-s style={{ opacity: 0, marginBottom: 14 }}>
               {error && <div className="sans" style={{ padding: "10px 14px", borderRadius: 8, background: "rgba(248,113,113,0.07)", border: "1px solid rgba(248,113,113,0.2)", color: "var(--red)", fontSize: 12, marginBottom: 12, textAlign: "center" }}>{error}</div>}
               <div style={{ display: "flex", gap: 8 }}>
-                <input className="sans" style={{ flex: 1, padding: "16px 20px", borderRadius: 2, border: "1px solid var(--b2)", background: "var(--s1)", color: "var(--white)", fontSize: 15 }} value={tb} onChange={e => setTb(e.target.value)} onKeyDown={e => e.key === "Enter" && launch()} placeholder="ex: Laylow, TKKF, La Fève..." disabled={loading} autoFocus/>
+                <ArtistAutocomplete value={tb} onChange={v => { setTb(v); setSelectedDeezerArtist(null); }} onSelect={(name, artist) => { setTb(name); setSelectedDeezerArtist(artist); launch(name, artist); }} disabled={loading} />
                 <button className="btn-primary display" onClick={launch} disabled={loading} style={{ padding: "16px 32px", borderRadius: 2, fontSize: 18, letterSpacing: "0.08em", whiteSpace: "nowrap" }}>{loading ? "..." : "GO →"}</button>
               </div>
               {loading && <Loader text={status}/>}
@@ -846,7 +1001,7 @@ JSON: {"messages":[{"approach":"nom approche","text":"le msg","send_via":"instag
           <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px 20px" }}>
 
             {loading && (
-              <BigLoader status={status || `Analyse du réseau de "${tb}"...`} label="Réseau Genius"/>
+              <BigLoader status={status || `Analyse du réseau de "${tb}"...`} label="Réseau Genius" onStop={() => { stop(); }}/>
             )}
 
             {!loading && artists.length > 0 && (
@@ -999,7 +1154,7 @@ JSON: {"messages":[{"approach":"nom approche","text":"le msg","send_via":"instag
           <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px 20px" }}>
 
             {loading && (
-              <BigLoader status={status} done={progress.done} total={progress.total} label="Scraping Instagram"/>
+              <BigLoader status={status} done={progress.done} total={progress.total} label="Scraping Instagram" onStop={() => { stop(); }}/>
             )}
 
             {!loading && Object.keys(contacts).length > 0 && (
@@ -1023,7 +1178,11 @@ JSON: {"messages":[{"approach":"nom approche","text":"le msg","send_via":"instag
 
               {/* Contact cards */}
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {Object.entries(contacts).map(([n, c]) => (
+                {Object.entries(contacts).sort(([,a],[,b]) => {
+                  const aHasEmail = (a.emails?.length > 0 || a.email) ? 1 : 0;
+                  const bHasEmail = (b.emails?.length > 0 || b.email) ? 1 : 0;
+                  return bHasEmail - aHasEmail;
+                }).map(([n, c]) => (
                   <div key={n} style={{ padding: 20, background: "var(--s1)", border: "1px solid var(--b1)", borderRadius: 2, transition: "border-color 0.2s" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: c.error ? 0 : 16 }}>
                       <div style={{ width: 46, height: 46, borderRadius: "50%", background: "rgba(255,0,102,0.12)", border: "2px solid rgba(255,0,102,0.25)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 800, color: "var(--accent)", flexShrink: 0 }}>
@@ -1056,6 +1215,10 @@ JSON: {"messages":[{"approach":"nom approche","text":"le msg","send_via":"instag
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={ei === 0 ? "var(--accent)" : "var(--g3)"} strokeWidth="1.5"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
                             <span className="mono" style={{ flex: 1, fontSize: 12, color: ei === 0 ? "var(--accent-l)" : "var(--g4)" }}>{email}</span>
                             <button className="btn-copy sans" onClick={() => copy(email)} style={{ padding: "2px 10px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>Copier</button>
+                            <button onClick={() => openGmail(email, `Prod pour ${n}`, drafts[n]?.[0]?.text || "", `${n}_${ei}`)} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 10px", borderRadius: 2, fontSize: 10, fontWeight: 600, background: "rgba(255,0,102,0.08)", border: "1px solid rgba(255,0,102,0.2)", color: "var(--accent)", cursor: "pointer" }}>
+                              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                              {gmailCopied === `${n}_${ei}` ? "Copié — Ctrl+V dans Gmail" : "Gmail"}
+                            </button>
                           </div>
                         ))}
                         {c.biography && (
@@ -1112,12 +1275,9 @@ JSON: {"messages":[{"approach":"nom approche","text":"le msg","send_via":"instag
           <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px 20px" }}>
 
             {loading && (
-              <BigLoader status={status} done={progress.done} total={progress.total} label="Rédaction DMs"/>
+              <BigLoader status={status} done={progress.done} total={progress.total} label="Rédaction DMs" onStop={() => { stop(); }}
             )}
 
-            {!loading && Object.keys(drafts).length > 0 && (
-              <StatusBar text={`${Object.keys(drafts).length} artiste${Object.keys(drafts).length > 1 ? "s" : ""} · ${Object.values(drafts).flat().length} variante${Object.values(drafts).flat().length > 1 ? "s" : ""} générée${Object.values(drafts).flat().length > 1 ? "s" : ""}`}/>
-            )}
 
             {!loading && Object.entries(drafts).map(([n, msgs]) => (
               <div key={n} style={{ marginBottom: 40 }}>
@@ -1131,31 +1291,38 @@ JSON: {"messages":[{"approach":"nom approche","text":"le msg","send_via":"instag
                   <span className="mono" style={{ fontSize: 9, color: "var(--g1)" }}>{(msgs || []).length} variante{(msgs || []).length > 1 ? "s" : ""}</span>
                 </div>
 
-                {(msgs || []).map((m, j) => (
-                  <div key={j} style={{ marginBottom: 12 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, paddingLeft: 2 }}>
-                      <div style={{ width: 3, height: 3, borderRadius: "50%", background: "var(--accent)", flexShrink: 0 }}/>
-                      <span className="mono" style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", color: "var(--g2)" }}>{m.approach}</span>
-                      <span className="pill pill-medium" style={{ fontSize: 9 }}>{m.send_via}</span>
+                {(() => {
+                  const info = [...artists, ...beatmakers].find(a => a.name === n);
+                  const collab = info?.top_track || info?.known_for?.split(" ").slice(1, 3).join(" ") || null;
+                  const templateText = `Yo ${n}, voici des prods dans le même style que${collab ? ` "${collab}"` : " tes sons"}. Je te les laisse écouter`;
+                  return (
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, paddingLeft: 2 }}>
+                        <div style={{ width: 3, height: 3, borderRadius: "50%", background: "var(--g2)", flexShrink: 0 }}/>
+                        <span className="mono" style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px", color: "var(--g2)" }}>Template rapide</span>
+                      </div>
+                      <div style={{ position: "relative", padding: "14px 18px", background: "var(--s2)", border: "1px solid var(--b1)", borderRadius: "2px 12px 12px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                        <div className="sans" style={{ fontSize: 13, color: "var(--g3)", fontStyle: "italic" }}>{templateText}</div>
+                        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                          <button className="btn-copy sans" onClick={() => copy(templateText)} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="1"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            Copier
+                          </button>
+                          {contacts[n]?.email && (
+                            <button onClick={() => openGmail(contacts[n].email, `Prod pour ${n}`, templateText, `tpl_${n}`)} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", borderRadius: 2, fontSize: 10, fontWeight: 600, background: "rgba(255,0,102,0.08)", border: "1px solid rgba(255,0,102,0.2)", color: "var(--accent)", cursor: "pointer" }}>
+                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                              {gmailCopied === `tpl_${n}` ? "Copié — Ctrl+V dans Gmail" : "Gmail"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    {/* Bubble iMessage-style */}
-                    <div style={{ position: "relative", padding: "18px 20px", background: "rgba(255,0,102,0.06)", border: "1px solid rgba(255,0,102,0.15)", borderRadius: "2px 12px 12px 12px" }}>
-                      <div className="sans" style={{ fontSize: 13, lineHeight: 1.9, color: "var(--g4)", whiteSpace: "pre-wrap" }}>{m.text}</div>
-                      <button className="btn-copy sans" onClick={() => copy(m.text)} style={{ marginTop: 14, display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="1"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                        Copier
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })()}
+
               </div>
             ))}
 
-            {Object.keys(drafts).length > 0 && !loading && (
-              <div style={{ paddingTop: 16, borderTop: "1px solid var(--b1)" }}>
-                <button className="btn-ghost sans" onClick={writeDrafts} style={{ padding: "10px 20px", borderRadius: 2, fontSize: 12, fontWeight: 600 }}>Régénérer</button>
-              </div>
-            )}
           </div>
         </div>
       )}
