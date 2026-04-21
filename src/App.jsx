@@ -1030,7 +1030,7 @@ JSON: {"messages":[{"approach":"nom approche","text":"le msg","send_via":"instag
                     {w==="ALL" ? "Tous" : w}
                   </button>
                 ))}
-                <button className="sans" onClick={() => fa.forEach(a => tog(a.name))} style={{ marginLeft: "auto", padding: "5px 14px", borderRadius: 99, fontSize: 10, fontWeight: 600, border: "1px solid var(--b1)", background: "transparent", color: "var(--g3)", cursor: "pointer", transition: "all 0.15s" }}>
+                <button className="sans" onClick={() => setSel(new Set([...artists, ...beatmakers].map(a => a.name)))} style={{ marginLeft: "auto", padding: "5px 14px", borderRadius: 99, fontSize: 10, fontWeight: 600, border: "1px solid var(--b1)", background: "transparent", color: "var(--g3)", cursor: "pointer", transition: "all 0.15s" }}>
                   Tout sélectionner
                 </button>
               </div>
