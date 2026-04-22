@@ -264,5 +264,30 @@ export async function buildGeniusNetwork(artistName, deezerId = null) {
   result.artists.sort((a, b) => b.nb_fan - a.nb_fan);
   result.beatmakers.sort((a, b) => (b.nb_fan || 0) - (a.nb_fan || 0));
 
+  // 6. Artistes de la même niche via Deezer related
+  let deezerArtistId = deezerId;
+  if (!deezerArtistId) {
+    const d = await deezerFanCount(artistName);
+    deezerArtistId = d.deezer_id;
+  }
+  if (deezerArtistId) {
+    try {
+      await delay(200);
+      const res = await fetch(`https://api.deezer.com/artist/${deezerArtistId}/related?limit=20`);
+      const data = await res.json();
+      result.related = (data.data || []).map(a => ({
+        name: a.name,
+        deezer_id: a.id,
+        nb_fan: a.nb_fan || 0,
+        wave: classifyWave(a.nb_fan || 0),
+        picture: a.picture_medium || null,
+      })).sort((a, b) => b.nb_fan - a.nb_fan);
+    } catch {
+      result.related = [];
+    }
+  } else {
+    result.related = [];
+  }
+
   return result;
 }

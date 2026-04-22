@@ -565,6 +565,7 @@ export default function PurB() {
   }, []);
   const [artists, setArtists]   = useState([]);
   const [beatmakers, setBeatmakers] = useState([]);
+  const [related, setRelated]   = useState([]);
   const [sel, setSel]           = useState(new Set());
   const [contacts, setContacts] = useState({});
   const [drafts, setDrafts]     = useState({});
@@ -596,7 +597,7 @@ export default function PurB() {
     if (!input || loading) return;
     stopRef.current = false;
     const deezerArtist = forceDeezerArtist ?? selectedDeezerArtist;
-    setLoading(true); setError(null); setDebug([]); setArtists([]); setBeatmakers([]); setSel(new Set()); setProgress({ done: 0, total: 0 });
+    setLoading(true); setError(null); setDebug([]); setArtists([]); setBeatmakers([]); setRelated([]); setSel(new Set()); setProgress({ done: 0, total: 0 });
     try {
       log(`Recherche "${input}" sur Genius...`);
       setStatus(`Exploration du réseau de "${input}"...`);
@@ -609,7 +610,8 @@ export default function PurB() {
       if (!data.artists?.length && !data.beatmakers?.length) throw new Error(`"${input}" introuvable — essaie un autre nom`);
       setArtists(data.artists || []);
       setBeatmakers(data.beatmakers || []);
-      log(`✅ ${data.artists?.length || 0} artistes · ${data.beatmakers?.length || 0} beatmakers`);
+      setRelated(data.related || []);
+      log(`✅ ${data.artists?.length || 0} artistes · ${data.beatmakers?.length || 0} beatmakers · ${data.related?.length || 0} niche`);
     } catch (e) {
       if (!stopRef.current) { log(`❌ ${e.message}`); setError(e.message); setStep(0); }
     }
@@ -1069,6 +1071,46 @@ JSON: {"messages":[{"approach":"nom approche","text":"le msg","send_via":"instag
                 <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to right, var(--bg) 0%, transparent 6%, transparent 94%, var(--bg) 100%)", zIndex: 1, pointerEvents: "none" }}/>
                 <EQBars count={64} height={36} opacity={0.18}/>
               </div>
+
+              {/* Dans la même niche */}
+              {related.length > 0 && (<>
+                <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14 }}>
+                  <span className="display" style={{ fontSize: 11, color: "var(--g3)", letterSpacing: "3px" }}>DANS LA MÊME NICHE</span>
+                  <div style={{ flex: 1, height: 1, background: "var(--b1)" }}/>
+                  <span className="mono" style={{ fontSize: 10, color: "var(--g1)" }}>{related.length}</span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 6, marginBottom: 24 }}>
+                  {related.map((r, i) => (
+                    <div key={i} style={{
+                      padding: "12px 14px", display: "flex", gap: 10, alignItems: "center",
+                      background: "var(--s1)", border: "1px solid var(--b1)",
+                      borderRadius: 2, transition: "border-color 0.18s",
+                    }}>
+                      {r.picture ? (
+                        <img src={r.picture} alt={r.name} style={{ width: 36, height: 36, borderRadius: 2, objectFit: "cover", flexShrink: 0 }}/>
+                      ) : (
+                        <div style={{ width: 36, height: 36, borderRadius: 2, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, background: "var(--s3)", color: "var(--g3)" }}>
+                          {(r.name[0] || "?").toUpperCase()}
+                        </div>
+                      )}
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div className="sans" style={{ fontWeight: 700, fontSize: 13, color: "var(--white)", marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          {r.wave && <span className={wavePill(r.wave)}>{r.wave}</span>}
+                          <span className="mono" style={{ fontSize: 9, color: "var(--g1)" }}>{r.nb_fan ? r.nb_fan.toLocaleString() : ""}</span>
+                        </div>
+                      </div>
+                      <button
+                        className="btn-ghost sans"
+                        onClick={() => { setTb(r.name); setSelectedDeezerArtist({ id: r.deezer_id, name: r.name }); launch(r.name, { id: r.deezer_id, name: r.name }); }}
+                        style={{ padding: "6px 10px", borderRadius: 2, fontSize: 10, fontWeight: 600, flexShrink: 0, whiteSpace: "nowrap" }}
+                      >
+                        Explorer →
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>)}
 
               {/* Beatmakers section */}
               {beatmakers.length > 0 && (<>
