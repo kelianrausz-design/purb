@@ -1032,9 +1032,15 @@ JSON: {"messages":[{"approach":"nom approche","text":"le msg","send_via":"instag
                     {w==="ALL" ? "Tous" : w}
                   </button>
                 ))}
-                <button className="sans" onClick={() => setSel(new Set([...artists, ...beatmakers].map(a => a.name)))} style={{ marginLeft: "auto", padding: "5px 14px", borderRadius: 99, fontSize: 10, fontWeight: 600, border: "1px solid var(--b1)", background: "transparent", color: "var(--g3)", cursor: "pointer", transition: "all 0.15s" }}>
-                  Tout sélectionner
-                </button>
+                {(() => {
+                  const allNames = new Set([...artists, ...beatmakers, ...related].map(a => a.name));
+                  const allSelected = allNames.size > 0 && [...allNames].every(n => sel.has(n));
+                  return (
+                    <button className="sans" onClick={() => allSelected ? setSel(new Set()) : setSel(allNames)} style={{ marginLeft: "auto", padding: "5px 14px", borderRadius: 99, fontSize: 10, fontWeight: 600, border: `1px solid ${allSelected ? "rgba(255,0,102,0.4)" : "var(--b1)"}`, background: allSelected ? "rgba(255,0,102,0.12)" : "transparent", color: allSelected ? "var(--accent)" : "var(--g3)", cursor: "pointer", transition: "all 0.15s" }}>
+                      {allSelected ? "Tout désélectionner" : "Tout sélectionner"}
+                    </button>
+                  );
+                })()}
               </div>
 
               {/* Artist cards — clickable rows */}
